@@ -534,6 +534,60 @@ async def _wait_qq_qr(page, timeout: float = 60.0) -> None:
 
 
 async def _grab_qq_qr(page) -> bytes:
+    """截取 QQ 二维码。
+
+    借鉴 GloryOfKings-Plugin：QQ 原始二维码是 1-bit 灰度 PNG，部分机器人中转
+    会对它返回空图片链接。这里在页面内把图画到白底 canvas 再导出 JPEG，
+    不改变二维码内容，但能稳定通过中转；失败再退化为普通截图。
+    """
+    try:
+        data_url = await page.evaluate(
+            """() => {
+                const el = document.querySelector(
+                    "#qrlogin_img, .qrlogin_img, img[src*='ptqrshow'], "
+                    + "img[src*='qrcode'], canvas#qrlogin_canvas, .qrlogin canvas"
+                );
+                if (!el) return null;
+                try {
+                    const draw = (img) => {
+                        const c = document.createElement('canvas');
+                        c.width = img.naturalWidth || img.width;
+                        c.height = img.naturalHeight || img.height;
+                        if (!c.width || !c.height) throw new Error('empty size');
+                        const ctx = c.getContext('2d');
+                        ctx.fillStyle = '#fff';
+                        ctx.fillRect(0, 0, c.width, c.height);
+                        ctx.drawImage(img, 0, 0);
+                        return c.toDataURL('image/jpeg', 1);
+                    };
+                    if (el.tagName === 'CANVAS') return draw(el);
+                    const src = el.currentSrc || el.src || el.getAttribute('data-src');
+                    if (!src) return null;
+                    return fetch(src, { credentials: 'include' })
+                        .then(r => r.ok ? r.blob() : null)
+                        .then(blob => {
+                            if (!blob) return null;
+                            return new Promise((resolve) => {
+                                const url = URL.createObjectURL(blob);
+                                const img = new Image();
+                                const timer = setTimeout(() => { URL.revokeObjectURL(url); resolve(null); }, 10000);
+                                img.onload = () => {
+                                    clearTimeout(timer);
+                                    try { resolve(draw(img)); } catch (_) { resolve(null); }
+                                    finally { URL.revokeObjectURL(url); }
+                                };
+                                img.onerror = () => { clearTimeout(timer); URL.revokeObjectURL(url); resolve(null); };
+                                img.src = url;
+                            });
+                        });
+                } catch (_) { return null; }
+            }"""
+        )
+        if isinstance(data_url, str) and data_url.startswith("data:image/jpeg;base64,"):
+            return base64.b64decode(data_url.split(",", 1)[1])
+    except Exception as exc:  # noqa: BLE001
+        logger.debug(f"[王者扫码] 页面内二维码转 JPEG 失败，改用截图：{exc}")
+
     try:
         element = await page.query_selector(QQ_QR_SELECTORS)
         if element is not None:
@@ -767,6 +821,11 @@ async def _wait_qq(
 def _account_from_payload(platform: str, payload: dict) -> Account:
     encode_res = str(payload.get("encodeRes") or "")
     decoded = decode_encode_res(encode_res) if encode_res else {}
+    # 保留完整登录响应：AuthPool 账号池需要 encodeRes / userKey / accessToken 等字段，
+    # 只留 uid+token 的话新版 WzryUID 拿不到签名与解密所需的密钥。
+    raw = {k: v for k, v in payload.items() if v is not None}
+    raw.setdefault("encodeRes", encode_res)
+    raw.setdefault("userKey", str(decoded.get("userKey") or ""))
     return Account(
         platform=platform,
         user_id=str(payload.get("userId") or ""),
@@ -774,7 +833,7 @@ def _account_from_payload(platform: str, payload: dict) -> Account:
         user_key=str(decoded.get("userKey") or ""),
         nickname=str(payload.get("nickname") or payload.get("snsnickname") or ""),
         avatar=str(payload.get("avatar") or payload.get("bigAvatar") or ""),
-        raw={k: payload.get(k) for k in ("userId", "unionId", "appOpenid", "expires", "realRegisterTime")},
+        raw=raw,
     )
 
 

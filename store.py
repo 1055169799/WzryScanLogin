@@ -26,6 +26,7 @@ from gsuid_core.utils.database import base_models
 from gsuid_core.utils.database.write_gate import WriteGateTimeout, sqlite_write_gate
 
 from .login import validate_cookie
+from .auth_pool import sync_scan_account
 
 MODEL_CACHE: dict[str, Any] = {}
 
@@ -36,6 +37,8 @@ class SaveOutcome:
     backend: str = ""
     bound: int = -99  # 0 新绑定 / -2 已绑定 / 其它失败
     switched: int = -99
+    pool_synced: bool = False  # 是否已写入共享账号池（WzryUID 新版依赖它）
+    pool_note: str = ""
     note: str = ""
 
 
@@ -188,9 +191,20 @@ async def save_account(
     auto_bind: bool = True,
     auto_switch: bool = True,
     group_id: Optional[str] = None,
+    sync_pool: bool = True,
+    pool_global: bool = True,
 ) -> SaveOutcome:
-    """保存营地 CK（以及可选的 UID 绑定）。"""
+    """保存营地 CK（以及可选的 UID 绑定与共享账号池同步）。"""
     outcome = SaveOutcome()
+
+    # WzryUID 新版所有接口都从共享 AuthPool.json 取登录态，这一步是扫码能用的关键。
+    # 和数据库写入相互独立：任一失败都不影响另一路。
+    if sync_pool:
+        pool_result = await sync_scan_account(
+            account, owner_id, is_global=pool_global
+        )
+        outcome.pool_synced = bool(pool_result.get('ok'))
+        outcome.pool_note = str(pool_result.get('note') or '')
 
     if auto_save:
         model = _find_model("WzryUser", "wzryuser")

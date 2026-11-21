@@ -200,13 +200,22 @@ def _format_outcome(account, outcome) -> str:
     if account.nickname:
         lines.append(f"昵称：{account.nickname}")
 
+    if get_cfg("sync_auth_pool"):
+        if outcome.pool_synced:
+            suffix = "（全局账号）" if get_cfg("auth_pool_global") else ""
+            lines.append(f"✅ 登录态已同步到共享账号池{suffix}，WzryUID 现可直接查询")
+        else:
+            lines.append(f"⚠️ 登录态未同步到共享账号池（{outcome.pool_note or '未知原因'}），WzryUID 暂无法使用本次扫码结果")
+    else:
+        lines.append("ℹ️ 控制台已关闭「同步到共享账号池」，WzryUID 新版查询将无法使用本次扫码结果")
+
     if get_cfg("auto_save_ck"):
         if outcome.ck_saved:
-            lines.append("✅ CK 已写入 WzryUID 账号池")
+            lines.append("✅ CK 已写入 WzryUID 数据库账号池")
         else:
-            lines.append("⚠️ CK 写入账号池失败，请查看 bot 日志")
+            lines.append("⚠️ CK 写入数据库失败，请查看 bot 日志")
     else:
-        lines.append("ℹ️ 控制台已关闭「自动保存CK」，本次未写入账号池")
+        lines.append("ℹ️ 控制台已关闭「自动保存CK」，本次未写入数据库")
 
     if get_cfg("auto_bind_uid"):
         if outcome.bound == 0:
@@ -219,8 +228,8 @@ def _format_outcome(account, outcome) -> str:
     else:
         lines.append(f"ℹ️ 未自动绑定，可发送：王者绑定UID {account.user_id}")
 
-    if get_cfg("auto_save_ck") and not outcome.ck_saved:
-        lines.append("提示：CK 未保存时，WzryUID 查询会缺少 CK。")
+    if get_cfg("sync_auth_pool") and not outcome.pool_synced:
+        lines.append("提示：WzryUID 新版只认共享账号池，请检查权限或稍后重试扫码。")
     return "\n".join(lines)
 
 
@@ -248,6 +257,8 @@ async def _handle_success(bot: Bot, job: LoginJob, account) -> None:
         auto_bind=bool(get_cfg("auto_bind_uid")),
         auto_switch=bool(get_cfg("auto_switch_uid")),
         group_id=job.group_id,
+        sync_pool=bool(get_cfg("sync_auth_pool")),
+        pool_global=bool(get_cfg("auth_pool_global")),
     )
     await _safe_send(bot, _format_outcome(account, outcome))
 

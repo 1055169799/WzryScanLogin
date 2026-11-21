@@ -94,6 +94,17 @@ CONFIG_DEFAULT: Dict[str, GSC] = {
         "保存前调用一次营地接口确认 token 有效；明确失效时不写入账号池",
         True,
     ),
+    "sync_auth_pool": GsBoolConfig(
+        "同步到共享账号池",
+        "扫码成功后把登录态写入 WzryUID 自己的 AuthPool.json（data/WzryUID 下）；"
+        "WzryUID 查询需要这份新版登录态，关闭后扫码登录将无法用于查询。默认开启",
+        True,
+    ),
+    "auth_pool_global": GsBoolConfig(
+        "登记为全局账号",
+        "写入共享账号池时是否标记为全局账号（英雄榜等全局接口需要）。默认开启",
+        True,
+    ),
     # ---------------- QQ ----------------
     "divider_qq": GsDivider(
         "QQ 扫码设置",
